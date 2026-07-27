@@ -1,0 +1,35 @@
+{
+  "robot": {
+    "host": "192.168.1.5",
+    "enable_robot": false
+  },
+  "motion": {
+    "approach_pose": null,
+    "use_hardcoded_pose": false,
+    "jog_step": 0.0005,
+    "max_align_offset": 0.01,
+    "insert_depth": 0.002,
+    "max_insert_depth": 0.4,
+    "insert_sign": 1,
+    "joint_speed": 0.15,
+    "joint_acc": 0.15,
+    "jog_speed": 0.005,
+    "insert_speed": 0.003,
+    "linear_acc": 0.03,
+    "motion_timeout": 20.0,
+    "warn_distance": 0.05,
+    "ik_position_error": 0.0001,
+    "ik_orientation_error": 0.001
+  },
+  "force": {
+    "record": true,
+    "log_hz": 50.0,
+    "log_dir": "artifacts/logs/screw_demo",
+    "log_name": null,
+    "log_start_timeout": 2.0,
+    "log_tail": 0.5,
+    "log_success_tail": 20.0,
+    "bias_samples": 50,
+    "bias_dt": null
+  }
+}

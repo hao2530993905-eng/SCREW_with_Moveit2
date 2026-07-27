@@ -1,0 +1,153 @@
+# SCREW0721 git ignore rules
+#
+# Goal:
+#   Keep source code, documentation, configuration files, third-party source,
+#   and required reproduction assets such as YOLO model weights.
+#
+#   Ignore only files that are unnecessary for reproducing the project:
+#   robot run records, LeRobot datasets, camera capture dumps, logs, build
+#   products, caches, local IDE state, and temporary files.
+
+# ---------------------------------------------------------------------------
+# Local editor / Codex state
+# ---------------------------------------------------------------------------
+.agents/
+.codex/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------------------
+# OS files
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# Python caches and local environments
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.venv/
+venv/
+env/
+ENV/
+conda-meta/
+
+# Python packaging/build products
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# ---------------------------------------------------------------------------
+# C/C++ / CMake build products
+# ---------------------------------------------------------------------------
+# These are reproducible from CMake and source code, so they should not be
+# uploaded. This also covers apps/screw_driver/build and OpenArm CAN builds.
+build/
+build-*/
+cmake-build-*/
+**/build/
+**/build-*/
+**/cmake-build-*/
+**/CMakeFiles/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+Makefile
+compile_commands.json
+
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dll
+*.dylib
+*.exe
+*.out
+
+# ---------------------------------------------------------------------------
+# Robot experiment outputs
+# ---------------------------------------------------------------------------
+# Do not ignore the whole artifacts/ tree: artifacts/models/ contains YOLO
+# weights needed by the vision pipeline. Ignore only generated subfolders.
+artifacts/datasets/
+artifacts/logs/
+artifacts/camera_test_data/
+artifacts/runs/
+artifacts/results/
+artifacts/outputs/
+artifacts/records/
+artifacts/recordings/
+
+# Keep required reproduction model assets.
+!artifacts/models/
+!artifacts/models/**
+
+# Other common generated output folders, wherever a script may create them.
+output/
+outputs/
+runs/
+results/
+records/
+recordings/
+datasets/
+dataset/
+logs/
+log/
+wandb/
+mlruns/
+tensorboard/
+
+**/output/
+**/outputs/
+**/runs/
+**/results/
+**/records/
+**/recordings/
+**/datasets/
+**/dataset/
+**/logs/
+**/log/
+
+# LeRobot dataset files and raw recording streams. These are ignored only when
+# they appear inside generated data/output folders by the directory rules above.
+# Model files such as .pt/.onnx/.engine are intentionally NOT ignored globally.
+
+# ---------------------------------------------------------------------------
+# Temporary data files commonly produced during experiments
+# ---------------------------------------------------------------------------
+# Keep this section narrow. Do not globally ignore .json/.yaml/.pt/.onnx/.png
+# because those can be required project assets.
+*.tmp
+*.temp
+*.bak
+*.orig
+
+tmp/
+temp/
+.tmp/
+.temp/
+
+# ---------------------------------------------------------------------------
+# Local machine configuration / secrets
+# ---------------------------------------------------------------------------
+.env
+.env.*
+*.local
+*.secret
+secrets/

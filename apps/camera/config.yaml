@@ -1,0 +1,49 @@
+# config.yaml
+# ============================================================
+#  路径配置（相对于项目根目录）
+# ============================================================
+paths:
+  yolo_model: "artifacts/models/camera_weights/best.onnx"
+  image_template: "artifacts/camera_test_data/camera_{id}.jpg"
+  pointcloud_template: "artifacts/camera_test_data/{id}_outer_ring.ply"
+  output_dir: "artifacts/camera_test_data"
+  # 远程传输目标（可选）
+  remote_scp_target: "admin@192.168.36.114:'C:/Users/admin/Desktop/project/program_1/dataset'"
+
+# ============================================================
+#  检测与裁剪参数
+# ============================================================
+detection:
+  expand_pixels: 5  
+  voxel_size: 0.28    
+
+# ============================================================
+#  圆环半径范围（物理单位）
+# ============================================================
+radius:
+  outer_min: 10.0
+  outer_max: 15.0
+  inner_min: 4.0
+  inner_max: 6.5
+
+# ============================================================
+#  拟合与统计滤波参数
+# ============================================================
+fitting:
+  epoch: 5
+  stat_nb_neighbors: 20
+  stat_std_ratio: 2.0
+  plane_iterations: 200
+  ransac_iters: 800
+  point_valid_threshold: 0.001
+
+
+  # ============================================================
+#  相机参数
+# ============================================================
+camera:
+  ExpTime2D: 10               # 2D 曝光时间（控制彩色图亮度，单位 ms）
+  ProjectorBrightness: 1      # 投影仪亮度（影响点云质量，非彩色图亮度）
+  Gain2D: 0                   # 2D 增益（增加噪点风险，尽量保持 0）
+  FlashLightOn: True          # 开启白光补光灯（适合暗环境）
+  ParamsBatch3D: 10.0         # 3D 曝光时间
