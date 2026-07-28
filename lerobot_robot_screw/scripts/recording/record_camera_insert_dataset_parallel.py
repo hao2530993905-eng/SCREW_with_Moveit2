@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import argparse
 import ast
+from contextlib import contextmanager
 import importlib.util
 import math
 import json
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -221,6 +224,38 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         help="automatically confirm all prompts, skip manual alignment, and start insertion",
     )
     parser.add_argument(
+        "--start-moveit-stack",
+        action="store_true",
+        help=(
+            "start planning-only MoveIt, RViz, the screwdriver model, and saved "
+            "obstacles; RTDE retains robot control and the recorder backend is moveit"
+        ),
+    )
+    parser.add_argument(
+        "--moveit-ur-type",
+        default="ur3",
+        help="UR model passed to moveit_rtde_planning.launch.py",
+    )
+    parser.add_argument(
+        "--moveit-kinematics-params-file",
+        type=Path,
+        default=None,
+        help="factory calibration YAML for the physical robot",
+    )
+    parser.add_argument(
+        "--no-moveit-rviz",
+        dest="moveit_start_rviz",
+        action="store_false",
+        default=True,
+        help="do not start RViz when --start-moveit-stack is used",
+    )
+    parser.add_argument(
+        "--moveit-launch-timeout-s",
+        type=float,
+        default=45.0,
+        help="maximum time to wait for the automatically started MoveIt graph",
+    )
+    parser.add_argument(
         "--log-root",
         type=Path,
         default=DEFAULT_LOG_ROOT,
@@ -237,6 +272,9 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         record_args = record_args[1:]
     args.calibration_json = resolve_optional_repo_path(args.calibration_json)
     args.camera_result_json = resolve_optional_repo_path(args.camera_result_json)
+    args.moveit_kinematics_params_file = resolve_optional_repo_path(
+        args.moveit_kinematics_params_file
+    )
     args.log_root = resolve_repo_path(args.log_root)
     return args, record_args
 
@@ -298,7 +336,7 @@ def connect_robot_and_screw(
 ):
     connection_args = record_module.parse_args(record_args)
     robot = (
-        record_module.URDriver(connection_args.robot_host)
+        record_module.make_robot(connection_args)
         if connection_args.enable_robot
         else record_module.DryRunRobot()
     )
@@ -327,6 +365,177 @@ def connect_robot_and_screw(
             if hasattr(robot, "close"):
                 robot.close()
         raise
+
+
+def replace_record_arg(
+    record_args: list[str],
+    name: str,
+    value: str,
+) -> list[str]:
+    result = list(record_args)
+    try:
+        index = result.index(name)
+    except ValueError:
+        result.extend([name, value])
+        return result
+    if index + 1 >= len(result):
+        raise ValueError(f"{name} requires a value")
+    result[index + 1] = value
+    return result
+
+
+def moveit_graph_ready() -> bool:
+    commands = (
+        (["ros2", "action", "list"], "/move_action"),
+        (["ros2", "service", "list"], "/compute_ik"),
+    )
+    for command, required_name in commands:
+        try:
+            completed = subprocess.run(
+                command,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=4.0,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        if completed.returncode != 0:
+            return False
+        if required_name not in completed.stdout.splitlines():
+            return False
+    try:
+        scene = subprocess.run(
+            [
+                "ros2",
+                "service",
+                "call",
+                "/get_planning_scene",
+                "moveit_msgs/srv/GetPlanningScene",
+                "{components: {components: 28}}",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=5.0,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    required_objects = {
+        "Box_0",
+        "Box_1",
+        "Box_2",
+        "Box_3",
+        "Box_4",
+        "screwdriver_tool",
+    }
+    if scene.returncode != 0:
+        return False
+    if not all(f"id='{name}'" in scene.stdout for name in required_objects):
+        return False
+    return True
+
+
+def stop_process_group(process: subprocess.Popen[Any]) -> None:
+    if process.poll() is not None:
+        return
+    for stop_signal, timeout_s in (
+        (signal.SIGINT, 8.0),
+        (signal.SIGTERM, 4.0),
+        (signal.SIGKILL, 2.0),
+    ):
+        try:
+            os.killpg(process.pid, stop_signal)
+        except ProcessLookupError:
+            return
+        try:
+            process.wait(timeout=timeout_s)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+@contextmanager
+def managed_moveit_stack(
+    args: argparse.Namespace,
+    record_args: list[str],
+    log_dir: Path,
+):
+    if not args.start_moveit_stack:
+        yield record_args
+        return
+
+    backend = record_arg_value(record_args, "--motion-backend")
+    if backend not in (None, "moveit"):
+        raise ValueError(
+            "--start-moveit-stack conflicts with "
+            f"--motion-backend {backend}; use --motion-backend moveit"
+        )
+    record_args = replace_record_arg(
+        record_args,
+        "--motion-backend",
+        "moveit",
+    )
+
+    command = [
+        "ros2",
+        "launch",
+        "screw_moveit_integration",
+        "moveit_rtde_planning.launch.py",
+        f"ur_type:={args.moveit_ur_type}",
+        "start_rviz:=" + ("true" if args.moveit_start_rviz else "false"),
+        "attach_tool:=true",
+        "load_saved_scene:=true",
+    ]
+    if args.moveit_kinematics_params_file is not None:
+        command.append(
+            "kinematics_params_file:="
+            + str(args.moveit_kinematics_params_file)
+        )
+
+    launch_log_path = log_dir / "moveit_launch.log"
+    print("[MoveIt] Starting integrated ROS stack:")
+    print(" ".join(command))
+    print(f"[MoveIt] Launch log: {launch_log_path}")
+
+    with launch_log_path.open("w", encoding="utf-8") as launch_log:
+        process = subprocess.Popen(
+            command,
+            cwd=str(REPO_ROOT),
+            stdout=launch_log,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            deadline = time.monotonic() + args.moveit_launch_timeout_s
+            while time.monotonic() < deadline:
+                return_code = process.poll()
+                if return_code is not None:
+                    tail = launch_log_path.read_text(
+                        encoding="utf-8",
+                        errors="replace",
+                    ).splitlines()[-40:]
+                    raise RuntimeError(
+                        "MoveIt launch exited early with code "
+                        f"{return_code}:\n" + "\n".join(tail)
+                    )
+                if moveit_graph_ready():
+                    print("[MoveIt] Planning and IK services are ready.")
+                    break
+                time.sleep(1.0)
+            else:
+                raise TimeoutError(
+                    "Timed out waiting for MoveIt. See "
+                    f"{launch_log_path}"
+                )
+
+            yield record_args
+        finally:
+            print("[MoveIt] Stopping the integrated ROS stack.")
+            stop_process_group(process)
 
 
 def prepare_record_module_and_connections(
@@ -734,7 +943,18 @@ def main() -> None:
         sys.stdout = TeeStream(original_stdout, log_file)
         sys.stderr = TeeStream(original_stderr, log_file)
         try:
-            _main_with_logging(args, record_args, timer, log_dir, log_path)
+            with managed_moveit_stack(
+                args,
+                record_args,
+                log_dir,
+            ) as prepared_record_args:
+                _main_with_logging(
+                    args,
+                    prepared_record_args,
+                    timer,
+                    log_dir,
+                    log_path,
+                )
         finally:
             sys.stdout = original_stdout
             sys.stderr = original_stderr

@@ -132,6 +132,23 @@ class DryRunRobot:
         self.connected = False
 
 
+def make_robot(args):
+    if not args.enable_robot:
+        return DryRunRobot()
+    if getattr(args, "motion_backend", "rtde") == "moveit":
+        from screw_moveit_integration import MoveItPlannedRTDEDriver
+
+        return MoveItPlannedRTDEDriver(
+            host=args.robot_host,
+            group_name=args.moveit_group,
+            pose_frame=args.moveit_pose_frame,
+            planning_frame=args.moveit_planning_frame,
+            ee_link=args.moveit_ee_link,
+            planning_time=args.moveit_planning_time,
+        )
+    return URDriver(args.robot_host)
+
+
 def read_key() -> str:
     """Read one key and normalize arrow keys across Windows and Linux."""
     if sys.platform.startswith("win"):
@@ -563,7 +580,7 @@ def validate_args(args) -> None:
 def run(args) -> DemoState:
     validate_args(args)
     approach_pose = resolve_approach_pose(args)
-    robot = URDriver(args.robot_host) if args.enable_robot else DryRunRobot()
+    robot = make_robot(args)
     force_recorder: Optional[ForceRecorder] = None
 
     try:
@@ -691,6 +708,43 @@ def parse_args():
         parents=[config_parser],
     )
     parser.add_argument("--robot-host", default=cfg("robot.host", "192.168.1.5"))
+    parser.add_argument(
+        "--motion-backend",
+        choices=("rtde", "moveit"),
+        default=cfg("robot.motion_backend", "rtde"),
+        help=(
+            "rtde uses direct UR commands; moveit plans collision-free approach "
+            "paths and executes them through RTDE, preserving original moveL/servoL"
+        ),
+    )
+    parser.add_argument(
+        "--moveit-group",
+        default=cfg("moveit.group", "ur_manipulator"),
+    )
+    parser.add_argument(
+        "--moveit-pose-frame",
+        default=cfg("moveit.pose_frame", "base"),
+        help="frame used by existing UR TCP pose arguments",
+    )
+    parser.add_argument(
+        "--moveit-planning-frame",
+        default=cfg("moveit.planning_frame", "base_link"),
+    )
+    parser.add_argument(
+        "--moveit-ee-link",
+        default=cfg("moveit.ee_link", "tool0"),
+    )
+    parser.add_argument(
+        "--moveit-planning-time",
+        type=float,
+        default=cfg("moveit.planning_time", 5.0),
+    )
+    parser.add_argument(
+        "--moveit-max-servo-linear-speed",
+        type=float,
+        default=cfg("moveit.max_servo_linear_speed", 0.02),
+        help="deprecated compatibility option; insertion remains on RTDE servoL",
+    )
     parser.add_argument(
         "--enable-robot",
         action="store_true",

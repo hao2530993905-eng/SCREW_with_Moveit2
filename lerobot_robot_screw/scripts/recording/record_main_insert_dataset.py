@@ -87,6 +87,7 @@ from main import (  # noqa: E402
     DemoState,
     format_values,
     manual_align,
+    make_robot,
     move_joint_to_pose,
     move_linear,
     offset_in_tcp_frame,
@@ -97,7 +98,6 @@ from main import (  # noqa: E402
     wait_for_enter_or_abort,
 )
 from screw_client import assert_ok, make_screw_client  # noqa: E402
-from ur_driver import URDriver  # noqa: E402
 
 
 def resolve_repo_path(path: str | Path) -> Path:
@@ -971,6 +971,26 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--robot-host", default="192.168.1.5")
     parser.add_argument("--enable-robot", action="store_true")
     parser.add_argument(
+        "--motion-backend",
+        choices=("rtde", "moveit"),
+        default="rtde",
+        help=(
+            "rtde uses direct UR commands; moveit plans collision-free approach "
+            "paths and executes them through RTDE, preserving original moveL/servoL"
+        ),
+    )
+    parser.add_argument("--moveit-group", default="ur_manipulator")
+    parser.add_argument("--moveit-pose-frame", default="base")
+    parser.add_argument("--moveit-planning-frame", default="base_link")
+    parser.add_argument("--moveit-ee-link", default="tool0")
+    parser.add_argument("--moveit-planning-time", type=float, default=5.0)
+    parser.add_argument(
+        "--moveit-max-servo-linear-speed",
+        type=float,
+        default=0.02,
+        help="deprecated compatibility option; insertion remains on RTDE servoL",
+    )
+    parser.add_argument(
         "--approach-pose",
         nargs=6,
         type=float,
@@ -1186,7 +1206,7 @@ def run(args, robot=None, screw_client=None) -> DemoState:
     approach_pose = resolve_approach_pose(args)
     validate_output_paths(args)
     if robot is None:
-        robot = URDriver(args.robot_host) if args.enable_robot else DryRunRobot()
+        robot = make_robot(args)
     if screw_client is None:
         screw_client = make_screw_client(
             host=args.screw_host,

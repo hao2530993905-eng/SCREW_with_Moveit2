@@ -142,7 +142,7 @@ CAN-FD         开启
 
 ### 5. 连接方式
 
-当前不再启动或依赖机械臂/电批后台常驻连接。每次采集流程直接在当前进程中创建 URDriver 和 ScrewClient，并在流程结束时停止动作、`hold()` 电批、关闭 Socket 和释放 UR 连接。相机并行入口只负责并行执行相机处理和当前进程内的设备连接。
+当前不再依赖机械臂/电批后台常驻连接。每次采集流程通过统一工厂创建 RTDE 或 MoveIt 规划加 RTDE 执行的机械臂后端，并创建 ScrewClient。MoveIt 模式只替换孔前接近：MoveIt 生成碰撞检查后的关节轨迹，原 URDriver 通过 RTDE 执行；人工对孔和旋入仍使用原 `moveL/servoL/stopL`。相机并行入口使用 `--start-moveit-stack` 时会自动启动并回收纯规划 MoveIt、RViz、电批碰撞体和保存的障碍物，不启动 `ur_robot_driver`、ros2_control 或 MoveIt Servo。
 
 ## 运行前准备
 
@@ -195,6 +195,41 @@ python lerobot_robot_screw/scripts/recording/record_main_insert_dataset.py \
 ```
 
 相机入口会负责生成接近位姿，之后把参数传给同一条记录流程；并行入口会在当前进程内直接连接 UR 和电批。相机自动定位必须配合有效的相机到机器人标定文件，默认接近位姿只适合流程验证。
+
+### 相机并行入口 + MoveIt 一键流程
+
+首先按照 `ros2/screw_moveit_integration/README.md` 提取当前实体 UR3 的标定
+参数，并确保机械臂允许原项目通过 `ur_rtde` 发送脚本。这个模式不运行
+`ur_robot_driver`，也不需要播放 External Control 节点。然后从已经 source
+ROS 2 工作空间的终端运行：
+
+```bash
+cd ~/桌面/ROS2/moveit/SCREW_with_power_control
+source /opt/ros/humble/setup.bash
+source ~/桌面/ROS2/moveit/install/setup.bash
+
+python3 lerobot_robot_screw/scripts/recording/record_camera_insert_dataset_parallel.py \
+  --start-moveit-stack \
+  --moveit-kinematics-params-file \
+    $HOME/桌面/ROS2/moveit/config/ur3_calibration.yaml \
+  --camera-ip 192.168.1.66 \
+  -- \
+  --enable-robot \
+  --robot-host 192.168.1.5 \
+  --max-insert-depth 20 \
+  --insert-speed 3 \
+  --insert-sign 1 \
+  --screw-host 127.0.0.1 \
+  --screw-port 5055 \
+  --screw-speed-rpm 60 \
+  --torque-stop-nm TORQUE_THRESHOLD_NM
+```
+
+`--start-moveit-stack` 会自动向内层记录流程注入
+`--motion-backend moveit`。每次实验的 MoveIt 输出单独保存在实验目录的
+`moveit_launch.log`。如果 MoveIt 已由另一个终端启动，则省略
+`--start-moveit-stack`，并在 `--` 后显式添加
+`--motion-backend moveit`。
 
 ## 键盘交互
 
