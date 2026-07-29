@@ -139,12 +139,14 @@ class URDriver:
     def get_tcp_offset(self) -> List[float]:
         """Return the controller's currently active flange-to-TCP transform."""
         self._require_connected()
-        if not hasattr(self.rtde_r, "getTCPOffset"):
-            raise RuntimeError(
-                "Installed ur_rtde does not expose getTCPOffset(); "
-                "upgrade ur_rtde before using MoveIt TCP-target planning"
-            )
-        return _as_6d_list(self.rtde_r.getTCPOffset(), "active TCP offset")
+        for interface in (self.rtde_r, self.rtde_c):
+            getter = getattr(interface, "getTCPOffset", None)
+            if callable(getter):
+                return _as_6d_list(getter(), "active TCP offset")
+        raise RuntimeError(
+            "Installed ur_rtde exposes getTCPOffset() on neither the "
+            "receive nor control interface"
+        )
 
     def get_tcp_speed(self) -> List[float]:
         self._require_connected()

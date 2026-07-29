@@ -1040,6 +1040,14 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--screw-host", default="127.0.0.1")
     parser.add_argument("--screw-port", type=int, default=5055)
     parser.add_argument("--screw-timeout-s", type=float, default=2.0)
+    parser.add_argument(
+        "--skip-screwdriver",
+        action="store_true",
+        help=(
+            "do not connect the screwdriver; finish after the collision-aware "
+            "approach move without running moveL insertion"
+        ),
+    )
     parser.add_argument("--screw-speed-rpm", type=float, default=60.0)
     parser.add_argument(
         "--torque-stop-nm",
@@ -1207,7 +1215,7 @@ def run(args, robot=None, screw_client=None) -> DemoState:
     validate_output_paths(args)
     if robot is None:
         robot = make_robot(args)
-    if screw_client is None:
+    if screw_client is None and not args.skip_screwdriver:
         screw_client = make_screw_client(
             host=args.screw_host,
             port=args.screw_port,
@@ -1228,12 +1236,13 @@ def run(args, robot=None, screw_client=None) -> DemoState:
         if not robot_is_connected:
             if not robot.connect():
                 raise RuntimeError("Robot connection failed")
-        screw_client.connect()
-        preflight_screwdriver(
-            screw_client,
-            screw_lock,
-            require_fresh_feedback=args.enable_robot,
-        )
+        if screw_client is not None:
+            screw_client.connect()
+            preflight_screwdriver(
+                screw_client,
+                screw_lock,
+                require_fresh_feedback=args.enable_robot,
+            )
 
         # In full-auto mode there must be no dependency initialization pause
         # after the tool reaches the approach pose. Fully prepare the dataset
@@ -1260,6 +1269,13 @@ def run(args, robot=None, screw_client=None) -> DemoState:
         print("Approach pose reached by joint-space motion.")
         if not wait_for_enter_or_abort("Confirm the tool is near the intended hole."):
             return DemoState.ABORTED
+
+        if args.skip_screwdriver:
+            print(
+                "[DONE] Screwdriver is disabled. MoveIt approach completed; "
+                "moveL insertion and torque control were not run."
+            )
+            return DemoState.DONE
 
         if recorder is None:
             recorder = InsertDatasetRecorder(robot, screw_client, screw_lock, args)
@@ -1359,12 +1375,13 @@ def run(args, robot=None, screw_client=None) -> DemoState:
                 print(f"Saved LeRobotDataset: {args.dataset_root}")
             except Exception as exc:
                 print(f"Recorder stop/save failed: {exc}")
-        try:
-            with screw_lock:
-                screw_client.hold()
-        except Exception:
-            pass
-        if hasattr(screw_client, "close"):
+        if screw_client is not None:
+            try:
+                with screw_lock:
+                    screw_client.hold()
+            except Exception:
+                pass
+        if screw_client is not None and hasattr(screw_client, "close"):
             screw_client.close()
         robot.close()
 

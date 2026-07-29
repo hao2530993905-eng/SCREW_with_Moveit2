@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>screw_moveit_integration</name>
+  <version>0.1.0</version>
+  <description>ROS1 MoveIt planning bridge for the SCREW RTDE workflow.</description>
+  <maintainer email="sjh@example.com">sjh</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>moveit_commander</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>
+  <exec_depend>moveit_ros_move_group</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>shape_msgs</exec_depend>
+  <exec_depend>ur3_moveit_config</exec_depend>
+  <exec_depend>ur_description</exec_depend>
+  <exec_depend>xacro</exec_depend>
+
+  <export/>
+</package>

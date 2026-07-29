@@ -1,0 +1,8 @@
+prefix=/home/sjh/SCREW_with_Moveit2/ros1_ws/devel
+
+Name: screw_moveit_integration
+Description: Description of screw_moveit_integration
+Version: 0.1.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

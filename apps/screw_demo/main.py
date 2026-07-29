@@ -22,6 +22,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import sys
 import threading
 import time
@@ -136,6 +137,17 @@ def make_robot(args):
     if not args.enable_robot:
         return DryRunRobot()
     if getattr(args, "motion_backend", "rtde") == "moveit":
+        if os.environ.get("ROS_VERSION") == "1":
+            from moveit_ros1_rtde_driver import MoveItROS1PlannedRTDEDriver
+
+            return MoveItROS1PlannedRTDEDriver(
+                host=args.robot_host,
+                group_name=args.moveit_group,
+                pose_frame=args.moveit_pose_frame,
+                planning_frame=args.moveit_planning_frame,
+                ee_link=args.moveit_ee_link,
+                planning_time=args.moveit_planning_time,
+            )
         from screw_moveit_integration import MoveItPlannedRTDEDriver
 
         return MoveItPlannedRTDEDriver(
@@ -547,7 +559,11 @@ def validate_args(args) -> None:
     elif args.max_insert_depth <= 0.0:
         raise ValueError("--max-insert-depth must be positive")
     if hasattr(args, "torque_stop_nm"):
-        if args.enable_robot and args.torque_stop_nm <= 0.0:
+        if (
+            args.enable_robot
+            and not getattr(args, "skip_screwdriver", False)
+            and args.torque_stop_nm <= 0.0
+        ):
             raise ValueError("real robot mode requires --torque-stop-nm > 0")
         if args.torque_stop_nm < 0.0:
             raise ValueError("--torque-stop-nm must be non-negative")

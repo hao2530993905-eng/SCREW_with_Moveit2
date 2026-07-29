@@ -16,6 +16,7 @@ import math
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -224,6 +225,14 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         help="automatically confirm all prompts, skip manual alignment, and start insertion",
     )
     parser.add_argument(
+        "--skip-screwdriver",
+        action="store_true",
+        help=(
+            "run camera, robot and MoveIt approach planning without connecting "
+            "the screwdriver; stop safely before insertion"
+        ),
+    )
+    parser.add_argument(
         "--start-moveit-stack",
         action="store_true",
         help=(
@@ -340,22 +349,27 @@ def connect_robot_and_screw(
         if connection_args.enable_robot
         else record_module.DryRunRobot()
     )
-    screw_client = record_module.make_screw_client(
-        host=connection_args.screw_host,
-        port=connection_args.screw_port,
-        timeout=connection_args.screw_timeout_s,
-        dry_run=not connection_args.enable_robot,
-    )
+    screw_client = None
+    if not connection_args.skip_screwdriver:
+        screw_client = record_module.make_screw_client(
+            host=connection_args.screw_host,
+            port=connection_args.screw_port,
+            timeout=connection_args.screw_timeout_s,
+            dry_run=not connection_args.enable_robot,
+        )
     try:
-        print("正在与相机并行启动机械臂和电批连接...")
+        print("正在与相机并行启动机械臂连接...")
         if not robot.connect():
             raise RuntimeError("Robot connection failed")
-        screw_client.connect()
-        record_module.preflight_screwdriver(
-            screw_client,
-            require_fresh_feedback=connection_args.enable_robot,
-        )
-        print("机械臂和电批连接已准备就绪。")
+        if screw_client is not None:
+            screw_client.connect()
+            record_module.preflight_screwdriver(
+                screw_client,
+                require_fresh_feedback=connection_args.enable_robot,
+            )
+            print("机械臂和电批连接已准备就绪。")
+        else:
+            print("机械臂连接已准备就绪；电批已按请求跳过。")
         return robot, screw_client
     except BaseException:
         try:
@@ -385,6 +399,22 @@ def replace_record_arg(
 
 
 def moveit_graph_ready() -> bool:
+    if os.environ.get("ROS_VERSION") == "1":
+        required_world = {"Box_0", "Box_1", "Box_2", "Box_3", "Box_4"}
+        try:
+            with socket.create_connection(("127.0.0.1", 5061), timeout=2.0) as connection:
+                connection.settimeout(3.0)
+                connection.sendall(b'{"command":"status"}\n')
+                with connection.makefile("rb") as reader:
+                    response = json.loads(reader.readline().decode("utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            return False
+        return bool(
+            response.get("ok")
+            and required_world.issubset(response.get("world_objects", []))
+            and "screwdriver_tool" in response.get("attached_objects", [])
+        )
+
     commands = (
         (["ros2", "action", "list"], "/move_action"),
         (["ros2", "service", "list"], "/compute_ik"),
@@ -457,6 +487,50 @@ def stop_process_group(process: subprocess.Popen[Any]) -> None:
             continue
 
 
+def ros1_launch_environment() -> dict[str, str]:
+    """Keep the application in Conda while ROS Noetic uses system Python."""
+    environment = os.environ.copy()
+    conda_prefix = environment.get("CONDA_PREFIX")
+
+    def without_conda(value: str) -> str:
+        entries = value.split(os.pathsep)
+        if not conda_prefix:
+            return value
+        return os.pathsep.join(
+            entry
+            for entry in entries
+            if entry and not Path(entry).is_relative_to(conda_prefix)
+        )
+
+    filtered_path = without_conda(environment.get("PATH", ""))
+    environment["PATH"] = os.pathsep.join(
+        ["/opt/ros/noetic/bin", "/usr/bin", "/bin", filtered_path]
+    )
+    for name in ("PYTHONPATH", "LD_LIBRARY_PATH"):
+        if name in environment:
+            environment[name] = without_conda(environment[name])
+    for name in (
+        "PYTHONHOME",
+        "PYTHONEXECUTABLE",
+        "QT_PLUGIN_PATH",
+        "QT_QPA_PLATFORM_PLUGIN_PATH",
+    ):
+        environment.pop(name, None)
+
+    # This launcher is commonly started through SSH, where DISPLAY is absent
+    # even though the same user has an active local GNOME session.  Preserve an
+    # explicitly supplied display; otherwise target the user's active desktop.
+    if not environment.get("DISPLAY"):
+        local_display = ":1"
+        x_socket = Path("/tmp/.X11-unix/X1")
+        x_authority = Path.home() / ".Xauthority"
+        if x_socket.exists() and x_authority.is_file():
+            environment["DISPLAY"] = local_display
+            environment.setdefault("XAUTHORITY", str(x_authority))
+    environment["ROS_PYTHON_VERSION"] = "3"
+    return environment
+
+
 @contextmanager
 def managed_moveit_stack(
     args: argparse.Namespace,
@@ -479,17 +553,35 @@ def managed_moveit_stack(
         "moveit",
     )
 
-    command = [
-        "ros2",
-        "launch",
-        "screw_moveit_integration",
-        "moveit_rtde_planning.launch.py",
-        f"ur_type:={args.moveit_ur_type}",
-        "start_rviz:=" + ("true" if args.moveit_start_rviz else "false"),
-        "attach_tool:=true",
-        "load_saved_scene:=true",
-    ]
+    is_ros1 = os.environ.get("ROS_VERSION") == "1"
+    if is_ros1:
+        command = [
+            "/opt/ros/noetic/bin/roslaunch",
+            "screw_moveit_integration",
+            "moveit_rtde_planning.launch",
+            "start_rviz:=" + (
+                "true" if args.moveit_start_rviz else "false"
+            ),
+        ]
+    else:
+        command = [
+            "ros2",
+            "launch",
+            "screw_moveit_integration",
+            "moveit_rtde_planning.launch.py",
+            f"ur_type:={args.moveit_ur_type}",
+            "start_rviz:=" + (
+                "true" if args.moveit_start_rviz else "false"
+            ),
+            "attach_tool:=true",
+            "load_saved_scene:=true",
+        ]
     if args.moveit_kinematics_params_file is not None:
+        if not args.moveit_kinematics_params_file.is_file():
+            raise FileNotFoundError(
+                "MoveIt kinematics file does not exist on this machine: "
+                f"{args.moveit_kinematics_params_file}"
+            )
         command.append(
             "kinematics_params_file:="
             + str(args.moveit_kinematics_params_file)
@@ -508,6 +600,7 @@ def managed_moveit_stack(
             stderr=subprocess.STDOUT,
             text=True,
             start_new_session=True,
+            env=ros1_launch_environment() if is_ros1 else None,
         )
         try:
             deadline = time.monotonic() + args.moveit_launch_timeout_s
@@ -976,6 +1069,8 @@ def _main_with_logging(
     robot = None
     screw_client = None
     handed_off_connections = False
+    if args.skip_screwdriver and "--skip-screwdriver" not in record_args:
+        record_args = [*record_args, "--skip-screwdriver"]
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         # Start the camera immediately. Loading the recorder module used to happen
@@ -992,7 +1087,7 @@ def _main_with_logging(
 
         def connection_task():
             timer.mark("机械臂连接启动")
-            print("[机械臂] 已启动机械臂和电批连接任务")
+            print("[机械臂] 已启动机械臂连接任务")
             timer.mark("记录模块加载开始")
             record_module = load_record_module()
             timer.mark("记录模块加载完成")
@@ -1007,7 +1102,7 @@ def _main_with_logging(
                 record_args,
             )
             timer.mark("机械臂连接完成")
-            print("[机械臂] 机械臂和电批连接已完成")
+            print("[机械臂] 机械臂连接已完成")
             return record_module, robot, screw_client
 
         camera_future = executor.submit(camera_task)
@@ -1036,6 +1131,11 @@ def _main_with_logging(
 
         print("Selected camera center:", camera_center)
         print("Generated approach pose [mm, rad]:", approach_pose)
+
+        publish_target = getattr(robot, "publish_tcp_target", None)
+        if callable(publish_target):
+            publish_target(approach_pose)
+            print("[MoveIt] Published target TCP marker to RViz before planning.")
 
         record_args = strip_approach_pose(record_args)
         record_module_args = [

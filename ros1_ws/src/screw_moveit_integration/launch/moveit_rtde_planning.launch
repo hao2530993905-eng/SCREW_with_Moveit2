@@ -1,0 +1,52 @@
+<launch>
+  <arg name="start_rviz" default="true"/>
+  <arg name="bridge_port" default="5061"/>
+  <arg
+    name="kinematics_params_file"
+    default="$(find ur_description)/config/ur3/default_kinematics.yaml"/>
+  <arg
+    name="joint_limit_params_file"
+    default="$(find screw_moveit_integration)/config/ur3_joint_limits.yaml"/>
+
+  <param
+    name="robot_description"
+    command="$(find xacro)/xacro --inorder '$(find ur_description)/urdf/ur.xacro'
+      robot_model:=ur3
+      joint_limit_params:='$(arg joint_limit_params_file)'
+      kinematics_params:='$(arg kinematics_params_file)'
+      physical_params:='$(find ur_description)/config/ur3/physical_parameters.yaml'
+      visual_params:='$(find ur_description)/config/ur3/visual_parameters.yaml'"/>
+
+  <include file="$(find ur3_moveit_config)/launch/move_group.launch">
+    <arg name="load_robot_description" value="false"/>
+    <arg name="allow_trajectory_execution" value="false"/>
+    <arg name="fake_execution" value="false"/>
+  </include>
+
+  <node
+    pkg="robot_state_publisher"
+    type="robot_state_publisher"
+    name="robot_state_publisher"
+    output="screen"/>
+
+  <node
+    pkg="screw_moveit_integration"
+    type="moveit_bridge_server.py"
+    name="screw_moveit_bridge"
+    output="screen"
+    required="true">
+    <param name="port" value="$(arg bridge_port)"/>
+  </node>
+
+  <node
+    pkg="screw_moveit_integration"
+    type="apply_workcell_scene.py"
+    name="apply_saved_workcell_scene"
+    output="screen"/>
+
+  <include
+    if="$(arg start_rviz)"
+    file="$(find ur3_moveit_config)/launch/moveit_rviz.launch">
+    <arg name="config" value="$(find ur3_moveit_config)/launch/moveit.rviz"/>
+  </include>
+</launch>

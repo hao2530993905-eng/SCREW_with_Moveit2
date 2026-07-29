@@ -1,0 +1,60 @@
+# Single source of truth for joint position limits.
+#
+# Replace min_position/max_position with the six values configured on the UR
+# teach pendant under Safety -> Joint Limits. Values are radians. MoveIt loads
+# this file into robot_description and the RTDE executor reads the same file.
+joint_limits:
+  shoulder_pan:
+    has_position_limits: true
+    min_position: -6.283185307179586
+    max_position: 6.283185307179586
+    has_velocity_limits: true
+    max_velocity: 3.141592653589793
+    has_acceleration_limits: false
+    has_effort_limits: true
+    max_effort: 56.0
+  shoulder_lift:
+    has_position_limits: true
+    min_position: -6.283185307179586
+    max_position: 6.283185307179586
+    has_velocity_limits: true
+    max_velocity: 3.141592653589793
+    has_acceleration_limits: false
+    has_effort_limits: true
+    max_effort: 56.0
+  elbow_joint:
+    has_position_limits: true
+    min_position: -3.141592653589793
+    max_position: 3.141592653589793
+    has_velocity_limits: true
+    max_velocity: 3.141592653589793
+    has_acceleration_limits: false
+    has_effort_limits: true
+    max_effort: 28.0
+  wrist_1:
+    has_position_limits: true
+    min_position: -6.283185307179586
+    max_position: 6.283185307179586
+    has_velocity_limits: true
+    max_velocity: 6.283185307179586
+    has_acceleration_limits: false
+    has_effort_limits: true
+    max_effort: 12.0
+  wrist_2:
+    has_position_limits: true
+    min_position: -6.283185307179586
+    max_position: 6.283185307179586
+    has_velocity_limits: true
+    max_velocity: 6.283185307179586
+    has_acceleration_limits: false
+    has_effort_limits: true
+    max_effort: 12.0
+  wrist_3:
+    has_position_limits: true
+    min_position: -6.283185307179586
+    max_position: 6.283185307179586
+    has_velocity_limits: true
+    max_velocity: 6.283185307179586
+    has_acceleration_limits: false
+    has_effort_limits: true
+    max_effort: 12.0
