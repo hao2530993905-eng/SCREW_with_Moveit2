@@ -45,6 +45,30 @@ ros2 launch ur_calibration calibration_correction.launch.py \
 这里不需要运行示教器 External Control 节点。实体运动仍由原项目的
 `ur_rtde` 控制，机械臂需处于允许远程脚本控制的模式。
 
+## TCP 目标语义
+
+项目中的笛卡尔目标统一表示示教器当前激活 TCP 的目标位姿，不表示
+`tool0` 或法兰原点的目标位姿。
+
+MoveIt 后端在每次 IK 前通过 `RTDEReceiveInterface.getTCPOffset()` 从实体 UR
+实时读取当前活动 TCP 相对输出法兰的六维变换，然后计算：
+
+```text
+T_base_tool0 = T_base_tcp * inverse(T_tool0_tcp)
+```
+
+转换后的 `tool0` 目标只在 MoveIt 内部用于 IK；对外输入的
+`--approach-pose`、RTDE `getActualTCPPose()`、`moveL` 和 `servoL`
+始终使用同一个活动 TCP 语义。
+
+代码不包含固定的工具长度，也不会调用 `setTcp()` 覆盖示教器设置。若在 IK
+完成后、关节运动开始前修改活动 TCP，程序会拒绝该次运动，必须使用新 TCP
+重新求解 IK。
+
+活动 TCP 只定义“哪个工具点到达目标”。电批的实体碰撞几何仍由
+`ur3_workcell_scene` 中的附着碰撞体定义；修改 TCP 或更换工具后，还必须确认
+碰撞模型的尺寸、安装方向与实体一致。
+
 ## 一键整体流程
 
 先启动原电批服务，然后运行：

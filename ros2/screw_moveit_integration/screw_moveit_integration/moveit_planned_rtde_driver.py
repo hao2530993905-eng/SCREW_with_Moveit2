@@ -17,6 +17,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
 from .moveit_robot_driver import JOINT_NAMES, _as_six, _pose_message
+from .tcp_geometry import tcp_target_to_ee_target
 
 
 class MoveItPlannedRTDEDriver:
@@ -65,6 +66,7 @@ class MoveItPlannedRTDEDriver:
         self._state_thread: threading.Thread | None = None
         self._stop_state = threading.Event()
         self._rtde_lock = threading.RLock()
+        self._last_ik_tcp_offset: np.ndarray | None = None
 
     @property
     def rtde_c(self):
@@ -124,6 +126,10 @@ class MoveItPlannedRTDEDriver:
             "Hybrid motion ready: MoveIt-planned RTDE approach; "
             "original RTDE moveL/servoL insertion"
         )
+        self._node.get_logger().info(
+            "Cartesian targets refer to the active UR TCP; "
+            f"current flange-to-TCP offset={self.get_tcp_offset()}"
+        )
         return True
 
     def _publish_robot_state_loop(self) -> None:
@@ -165,10 +171,14 @@ class MoveItPlannedRTDEDriver:
         request.ik_request.group_name = self.group_name
         request.ik_request.ik_link_name = self.ee_link
         request.ik_request.pose_stamped.header.frame_id = self.pose_frame
-        request.ik_request.pose_stamped.pose = _pose_message(pose)
+        tcp_offset = np.asarray(self.get_tcp_offset(), dtype=float)
+        self._last_ik_tcp_offset = tcp_offset
+        ee_target = tcp_target_to_ee_target(pose, tcp_offset)
+        request.ik_request.pose_stamped.pose = _pose_message(ee_target)
         request.ik_request.avoid_collisions = True
         request.ik_request.timeout.sec = 2
         seed = list(qnear) if qnear is not None else self.get_joint_positions()
+        request.ik_request.robot_state.is_diff = True
         request.ik_request.robot_state.joint_state.name = list(JOINT_NAMES)
         request.ik_request.robot_state.joint_state.position = seed
 
@@ -196,6 +206,20 @@ class MoveItPlannedRTDEDriver:
         joint_tolerance: float = 0.001,
     ) -> bool:
         self._require_connected()
+        if self._last_ik_tcp_offset is not None:
+            current_tcp_offset = np.asarray(self.get_tcp_offset(), dtype=float)
+            if not np.allclose(
+                current_tcp_offset,
+                self._last_ik_tcp_offset,
+                rtol=0.0,
+                atol=1e-9,
+            ):
+                raise RuntimeError(
+                    "The active UR TCP changed after IK was solved. "
+                    "Recompute IK before starting joint motion. "
+                    f"IK TCP={self._last_ik_tcp_offset.tolist()}, "
+                    f"current TCP={current_tcp_offset.tolist()}"
+                )
         target = _as_six(joints, "joints")
         constraints = Constraints()
         constraints.joint_constraints = [
@@ -223,6 +247,7 @@ class MoveItPlannedRTDEDriver:
             1.0,
         )
         goal.request.start_state = RobotState()
+        goal.request.start_state.is_diff = True
         goal.request.start_state.joint_state.name = list(JOINT_NAMES)
         goal.request.start_state.joint_state.position = start_positions
         goal.request.goal_constraints = [constraints]
@@ -346,6 +371,10 @@ class MoveItPlannedRTDEDriver:
     def get_joint_positions(self):
         with self._rtde_lock:
             return self._rtde.get_joint_positions()
+
+    def get_tcp_offset(self):
+        with self._rtde_lock:
+            return self._rtde.get_tcp_offset()
 
     def move_l(self, *args, **kwargs):
         with self._rtde_lock:
